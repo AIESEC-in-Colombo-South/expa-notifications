@@ -4,8 +4,8 @@ import fetch from "node-fetch";
 // CONFIGURATION
 // ========================
 const EXPA_URL = "https://gis-api.aiesec.org/graphql";
-const TOKEN = "CT2tvj5RfWFH_97s1wYm5-psKYhr_avH-OGHYPrWCzA";
-const CHAT_WEBHOOK = "https://chat.googleapis.com/v1/spaces/AAQACcxWsdM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=BZyCLvXxJFCjNd1EDUqU_7sD-Beh7MfedZZNjDGdabI"; // from step 1
+const TOKEN = process.env.EXPA_TOKEN;           
+const CHAT_WEBHOOK = process.env.CHAT_WEBHOOK_URL; 
 
 let lastSeen = new Date("2000-01-01").toISOString();
 
@@ -176,3 +176,4 @@ async function testChat() {
   await checkSignups();
   setInterval(checkSignups, 60 * 1000);
 })();
+
