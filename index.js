@@ -203,8 +203,10 @@ async function pollAndSave() {
   }
 
   await initMongo();
-  console.log("[INFO] Starting EXPA Poller (Programme ID 7 only)...");
+  console.log("[INFO] Running one-time EXPA Poller (Programme ID 7 only)...");
 
   await pollAndSave();
-  setInterval(pollAndSave, 28 * 1000);
+
+  console.log("[INFO] Poll complete. Exiting...");
+  process.exit(0);
 })();
