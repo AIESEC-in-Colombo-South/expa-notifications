@@ -26,4 +26,5 @@ jobs:
         env:
           EXPA_TOKEN: ${{ secrets.EXPA_TOKEN }}
           CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
         run: node index.js
