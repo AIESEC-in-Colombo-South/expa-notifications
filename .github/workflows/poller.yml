@@ -1,0 +1,29 @@
+name: EXPA Signup Poller
+
+on:
+  schedule:
+    - cron: "* * * * *" # runs every minute
+  workflow_dispatch: # allows manual triggering
+
+jobs:
+  run-poller:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run EXPA poller
+        env:
+          EXPA_TOKEN: ${{ secrets.EXPA_TOKEN }}
+          CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
+        run: node index.js
