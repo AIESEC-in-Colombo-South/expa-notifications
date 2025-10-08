@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import 'dotenv/config';
 
 // ========================
 // CONFIGURATION
