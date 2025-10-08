@@ -22,6 +22,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 🧪 DEBUG STEP — Check if secrets are being injected
+      - name: Debug environment variable lengths
+        run: |
+          echo "EXPA_TOKEN length: ${#EXPA_TOKEN}"
+          echo "CHAT_WEBHOOK_URL length: ${#CHAT_WEBHOOK_URL}"
+          echo "MONGO_URI length: ${#MONGO_URI}"
+        env:
+          EXPA_TOKEN: ${{ secrets.EXPA_TOKEN }}
+          CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+
       - name: Run EXPA poller
         env:
           EXPA_TOKEN: ${{ secrets.EXPA_TOKEN }}
