@@ -1,8 +1,6 @@
 name: EXPA Signup Poller
 
 on:
-  schedule:
-    - cron: "* * * * *" # runs every minute
   workflow_dispatch:
 
 jobs:
