@@ -4,17 +4,17 @@ import 'dotenv/config';
 
 const EXPA_URL = "https://gis-api.aiesec.org/graphql";
 const TOKEN = process.env.EXPA_TOKEN;
-const CHAT_WEBHOOK = process.env.CHAT_WEBHOOK_URL;
-const iGT_WEBHOOK = process.env.iGT_CHAT_WEBHOOK;
+const CHAT_WEBHOOK = process.env.CHAT_WEBHOOK_URL;      // GV – outgoing
+const iGT_WEBHOOK = process.env.iGT_CHAT_WEBHOOK;       // iGT – incoming
+const iGV_WEBHOOK = process.env.iGV_CHAT_WEBHOOK;       // iGV – incoming
+const oGT_WEBHOOK = process.env.oGT_CHAT_WEBHOOK;       // oGT – outgoing
 const MONGO_URI = process.env.MONGO_URI;
-const iGV_WEBHOOK = process.env.iGV_CHAT_WEBHOOK
-const oGT_WEBHOOK = process.env.oGT_CHAT_WEBHOOK
 
 const DB_NAME = "signup";
 const SIGNUP_COLLECTION = "signupCollection";
 const APPLICATION_COLLECTION = "applicationsCollection";
-const TARGET_PROGRAMME = 7; // GV only
-const oGT_PROGRAMME  = 8;
+const GV_PROGRAMME = 7;
+const oGT_PROGRAMME = 8;
 
 let db;
 let signupCollection;
@@ -93,23 +93,31 @@ async function fetchSignups() {
   }
 }
 
-async function notifySignup(person) {
+async function notifySignup(person, programmeId) {
   const phone = person.contact_detail?.phone || "N/A";
   const dateTime = new Date(person.created_at).toLocaleString("en-GB", {
     timeZone: "Asia/Colombo"
   });
 
   const message = {
-    text: `[EXPA UPDATE][SIGN UP]\nName: ${person.full_name}\nPhone: ${phone}\nSigned up: ${dateTime}`
+    text: `[EXPA UPDATE][SIGN UP]\nName: ${person.full_name}\nProgramme: ${programmeId === GV_PROGRAMME ? "oGV" : "oGT"}\nPhone: ${phone}\nSigned up: ${dateTime}`
   };
 
+  let targetWebhook = CHAT_WEBHOOK; // default GV (outgoing)
+
+  if (programmeId === GV_PROGRAMME) {
+    targetWebhook = CHAT_WEBHOOK;
+  } else if (programmeId === oGT_PROGRAMME) {
+    targetWebhook = oGT_WEBHOOK;
+  }
+
   try {
-    const res = await fetch(CHAT_WEBHOOK, {
+    const res = await fetch(targetWebhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(message)
     });
-    console.log(`[INFO] Notified Google Chat for signup ${person.full_name}. Status:`, res.status);
+    console.log(`[INFO] Notified Google Chat for signup ${person.full_name} (${programmeId}). Status:`, res.status);
   } catch (err) {
     console.error("[ERROR] Failed to send signup notification:", err);
   }
@@ -122,17 +130,20 @@ async function pollAndSaveSignups() {
 
   for (const p of signups) {
     const selected = p?.person_profile?.selected_programmes || [];
-    const hasTarget = Array.isArray(selected) && selected.includes(TARGET_PROGRAMME);
+    if (!Array.isArray(selected)) continue;
 
-    if (!hasTarget) continue; // Ignore non-GV
+    const matchedProgrammes = selected.filter(id => id === GV_PROGRAMME || id === oGT_PROGRAMME);
+    if (matchedProgrammes.length === 0) continue;
 
     try {
       await signupCollection.insertOne({
         ...p,
         fetched_at: new Date()
       });
-      console.log(`[NEW GV SIGNUP] ${p.full_name}`);
-      await notifySignup(p);
+      console.log(`[NEW SIGNUP] ${p.full_name} (${matchedProgrammes.join(",")})`);
+      for (const prog of matchedProgrammes) {
+        await notifySignup(p, prog);
+      }
     } catch (err) {
       if (err.code === 11000) {
         continue; // duplicate
@@ -159,8 +170,8 @@ async function fetchApplications() {
       host_lc: true,
       home_mc: false,
       home_lc: true,
-      applied_at: true,   
-      opportunity: true   
+      applied_at: true,
+      opportunity: true
     },
     query: `
       query ApplicationIndexQuery(
@@ -199,16 +210,8 @@ async function fetchApplications() {
               title @include(if: $opportunity)
               host_lc @include(if: $host_lc) { name }
               home_mc @include(if: $host_mc) { name }
-
-              # 👇 NEW: Add programme + programmes
-              programme {
-                id
-                short_name_display
-              }
-              programmes {
-                id
-                short_name_display
-              }
+              programme { id short_name_display }
+              programmes { id short_name_display }
             }
           }
         }
@@ -242,8 +245,6 @@ async function fetchApplications() {
   }
 }
 
-
-
 async function notifyApplication(app) {
   const personName = app.person?.full_name || "Unknown";
   const oppTitle = app.opportunity?.title || "N/A";
@@ -252,40 +253,24 @@ async function notifyApplication(app) {
   const host = app?.opportunity?.host_lc?.name;
 
   const message = {
-    text: `[EXPA UPDATE][APPLICATION]\nName: ${personName}\nFunction: ${oppFunc}\nOppotunity: ${oppTitle}\nApplied at: ${dateTime}`
+    text: `[EXPA UPDATE][APPLICATION]\nName: ${personName}\nFunction: ${oppFunc}\nOpportunity: ${oppTitle}\nApplied at: ${dateTime}`
   };
 
   try {
-    var res;
-    if ((oppFunc == "GTe" || oppFunc == "GTa") && host == "COLOMBO SOUTH"){
-           res = await fetch(iGT_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(message)
-    });
+    let res;
+    if ((oppFunc === "GTe" || oppFunc === "GTa") && host === "COLOMBO SOUTH") {
+      res = await fetch(iGT_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(message) });
     }
-    if ((oppFunc == "GTe" || oppFunc == "GTa") && host != "COLOMBO SOUTH"){
-      res = await fetch(oGT_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(message)
-    });
+    if ((oppFunc === "GTe" || oppFunc === "GTa") && host !== "COLOMBO SOUTH") {
+      res = await fetch(oGT_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(message) });
     }
-    if (oppFunc == "GV" && host != "COLOMBO SOUTH"){
-           res = await fetch(CHAT_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(message)
-    });
+    if (oppFunc === "GV" && host !== "COLOMBO SOUTH") {
+      res = await fetch(CHAT_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(message) });
     }
-    if (oppFunc == "GV" && host == "COLOMBO SOUTH"){
-           res = await fetch(iGV_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(message)
-    });
+    if (oppFunc === "GV" && host === "COLOMBO SOUTH") {
+      res = await fetch(iGV_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(message) });
     }
-    console.log(`[INFO] Notified Google Chat for application ${personName}. Status:`, res.status);
+    console.log(`[INFO] Notified Google Chat for application ${personName}. Status:`, res?.status);
   } catch (err) {
     console.error("[ERROR] Failed to send application notification:", err);
   }
@@ -306,7 +291,7 @@ async function pollAndSaveApplications() {
       await notifyApplication(app);
     } catch (err) {
       if (err.code === 11000) {
-        continue; // already seen
+        continue; // duplicate
       } else {
         console.error("[ERROR] Failed to insert application:", err);
       }
