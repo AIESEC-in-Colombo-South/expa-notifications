@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import { MongoClient } from "mongodb";
-import 'dotenv/config';
+import "dotenv/config";
 
 const EXPA_URL = "https://gis-api.aiesec.org/graphql";
 const TOKEN = process.env.EXPA_TOKEN;
@@ -16,6 +16,7 @@ const APPLICATION_COLLECTION = "applicationsCollection";
 const GV_PROGRAMME = 7;
 const oGT_PROGRAMME = 8;
 
+let mongoClient;
 let db;
 let signupCollection;
 let applicationCollection;
@@ -24,11 +25,18 @@ let applicationCollection;
 // MongoDB Initialization
 // =============================
 async function initMongo() {
+  if (db && signupCollection && applicationCollection) {
+    return;
+  }
+
   try {
     console.log("[INFO] Connecting to MongoDB...");
-    const client = new MongoClient(MONGO_URI, { useUnifiedTopology: true });
-    await client.connect();
-    db = client.db(DB_NAME);
+    if (!mongoClient) {
+      mongoClient = new MongoClient(MONGO_URI);
+      await mongoClient.connect();
+    }
+
+    db = mongoClient.db(DB_NAME);
 
     signupCollection = db.collection(SIGNUP_COLLECTION);
     await signupCollection.createIndex({ id: 1 }, { unique: true });
@@ -39,7 +47,7 @@ async function initMongo() {
     console.log(`[INFO] Connected to MongoDB DB="${DB_NAME}" Collections: "${SIGNUP_COLLECTION}", "${APPLICATION_COLLECTION}"`);
   } catch (err) {
     console.error("[FATAL] Failed to connect to MongoDB:", err);
-    process.exit(1);
+    throw err;
   }
 }
 
@@ -299,21 +307,24 @@ async function pollAndSaveApplications() {
   }
 }
 
-// =============================
-// Main
-// =============================
-(async () => {
+function validateEnv() {
   if (!TOKEN || !CHAT_WEBHOOK || !MONGO_URI) {
-    console.error("[FATAL] Missing environment variables. Check your .env file.");
-    process.exit(1);
+    throw new Error("[FATAL] Missing environment variables. Check your .env file.");
   }
+}
 
-  await initMongo();
-  console.log("[INFO] Running one-time EXPA Poller (Signups + Applications)");
+export default async function runOnce() {
+  try {
+    validateEnv();
+    await initMongo();
+    console.log("[INFO] Running one-time EXPA Poller (Signups + Applications)");
 
-  await pollAndSaveSignups();
-  await pollAndSaveApplications();
+    await pollAndSaveSignups();
+    await pollAndSaveApplications();
 
-  console.log("[INFO] Poll complete. Exiting...");
-  process.exit(0);
-})();
+    console.log("[INFO] Poll complete.");
+  } catch (err) {
+    console.error("[ERROR] runOnce failed:", err);
+    throw err;
+  }
+}
