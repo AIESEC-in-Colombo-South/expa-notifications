@@ -9,8 +9,6 @@ const iGT_WEBHOOK = process.env.iGT_CHAT_WEBHOOK;       // iGT – incoming
 const iGV_WEBHOOK = process.env.iGV_CHAT_WEBHOOK;       // iGV – incoming
 const oGT_WEBHOOK = process.env.oGT_CHAT_WEBHOOK;       // oGT – outgoing
 const MONGO_URI = process.env.MONGO_URI;
-const POLL_INTERVAL_MINUTES = Number(process.env.POLL_INTERVAL_MINUTES ?? 1);
-const POLL_INTERVAL_MS = Math.max(1, POLL_INTERVAL_MINUTES || 5) * 60 * 1000;
 
 const DB_NAME = "signup";
 const SIGNUP_COLLECTION = "signupCollection";
@@ -18,7 +16,6 @@ const APPLICATION_COLLECTION = "applicationsCollection";
 const GV_PROGRAMME = 7;
 const oGT_PROGRAMME = 8;
 
-let mongoClient;
 let db;
 let signupCollection;
 let applicationCollection;
@@ -29,9 +26,9 @@ let applicationCollection;
 async function initMongo() {
   try {
     console.log("[INFO] Connecting to MongoDB...");
-    mongoClient = new MongoClient(MONGO_URI);
-    await mongoClient.connect();
-    db = mongoClient.db(DB_NAME);
+    const client = new MongoClient(MONGO_URI, { useUnifiedTopology: true });
+    await client.connect();
+    db = client.db(DB_NAME);
 
     signupCollection = db.collection(SIGNUP_COLLECTION);
     await signupCollection.createIndex({ id: 1 }, { unique: true });
@@ -302,66 +299,21 @@ async function pollAndSaveApplications() {
   }
 }
 
-async function runCycle() {
-  console.log("[INFO] Starting poll cycle");
-  await pollAndSaveSignups();
-  await pollAndSaveApplications();
-  console.log("[INFO] Poll cycle complete");
-}
-
-function validateEnv() {
-  const missing = [];
-  if (!TOKEN) missing.push("EXPA_TOKEN");
-  if (!CHAT_WEBHOOK) missing.push("CHAT_WEBHOOK_URL");
-  if (!iGT_WEBHOOK) missing.push("iGT_CHAT_WEBHOOK");
-  if (!iGV_WEBHOOK) missing.push("iGV_CHAT_WEBHOOK");
-  if (!oGT_WEBHOOK) missing.push("oGT_CHAT_WEBHOOK");
-  if (!MONGO_URI) missing.push("MONGO_URI");
-  if (missing.length) {
-    console.error(`[FATAL] Missing environment variables: ${missing.join(", ")}`);
-    process.exit(1);
-  }
-}
-
-async function shutdownHandler(signal) {
-  console.log(`\n[INFO] Received ${signal}. Closing Mongo connection...`);
-  try {
-    await mongoClient?.close();
-  } catch (err) {
-    console.error("[WARN] Error closing Mongo client", err);
-  }
-  process.exit(0);
-}
-
 // =============================
-// Main (recurring)
+// Main
 // =============================
 (async () => {
-  validateEnv();
+  if (!TOKEN || !CHAT_WEBHOOK || !MONGO_URI) {
+    console.error("[FATAL] Missing environment variables. Check your .env file.");
+    process.exit(1);
+  }
 
   await initMongo();
-  console.log(`[INFO] Poller running continuously every ${POLL_INTERVAL_MS / 60000} minute(s)`);
+  console.log("[INFO] Running one-time EXPA Poller (Signups + Applications)");
 
-  let cycleInProgress = false;
+  await pollAndSaveSignups();
+  await pollAndSaveApplications();
 
-  const scheduleCycle = async () => {
-    if (cycleInProgress) {
-      console.warn("[WARN] Previous cycle still running. Skipping this interval.");
-      return;
-    }
-    cycleInProgress = true;
-    try {
-      await runCycle();
-    } catch (err) {
-      console.error("[ERROR] Poll cycle failed", err);
-    } finally {
-      cycleInProgress = false;
-    }
-  };
-
-  await scheduleCycle(); // immediate run
-  setInterval(scheduleCycle, POLL_INTERVAL_MS);
-
-  process.on("SIGINT", () => shutdownHandler("SIGINT"));
-  process.on("SIGTERM", () => shutdownHandler("SIGTERM"));
+  console.log("[INFO] Poll complete. Exiting...");
+  process.exit(0);
 })();
