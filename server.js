@@ -22,6 +22,11 @@ app.get("/", (req, res) => {
   res.send("EXPA Poller Running");
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).send("ok");
+});
+
+
 app.listen(PORT, () => {
   console.log(`[INFO] Server listening on port ${PORT}`);
 });
