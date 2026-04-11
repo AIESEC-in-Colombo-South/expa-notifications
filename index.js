@@ -1,5 +1,7 @@
 import fetch from "node-fetch";
 import { MongoClient } from "mongodb";
+import { google } from "googleapis";
+import fs from "fs";
 import "dotenv/config";
 
 const EXPA_URL = "https://gis-api.aiesec.org/graphql";
@@ -9,6 +11,7 @@ const iGT_WEBHOOK = process.env.iGT_CHAT_WEBHOOK;       // iGT – incoming
 const iGV_WEBHOOK = process.env.iGV_CHAT_WEBHOOK;       // iGV – incoming
 const oGT_WEBHOOK = process.env.oGT_CHAT_WEBHOOK;       // oGT – outgoing
 const MONGO_URI = process.env.MONGO_URI;
+const SHEET_ID = process.env.GOOGLE_SHEETS_ID;
 
 const DB_NAME = "signup";
 const SIGNUP_COLLECTION = "signupCollection";
@@ -20,6 +23,35 @@ let mongoClient;
 let db;
 let signupCollection;
 let applicationCollection;
+
+// Google Sheets Auth
+const serviceAccount = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+  : null;
+
+const auth = new google.auth.GoogleAuth({
+  ...(serviceAccount ? { credentials: serviceAccount } : { keyFile: "service-account.json" }),
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+});
+const sheets = google.sheets({ version: "v4", auth });
+
+async function appendToSheet(range, values) {
+  if (!SHEET_ID) {
+    console.warn("[WARN] SHEET_ID not set, skipping sheet update.");
+    return;
+  }
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: range,
+      valueInputOption: "USER_ENTERED",
+      resource: { values: [values] },
+    });
+    console.log(`[INFO] Appended row to sheet range: ${range}`);
+  } catch (err) {
+    console.error(`[ERROR] Failed to append to sheet (${range}):`, err.message);
+  }
+}
 
 // =============================
 // MongoDB Initialization
@@ -149,6 +181,22 @@ async function pollAndSaveSignups() {
         fetched_at: new Date()
       });
       console.log(`[NEW SIGNUP] ${p.full_name} (${matchedProgrammes.join(",")})`);
+      
+      const dateTime = new Date(p.created_at).toLocaleString("en-GB", { timeZone: "Asia/Colombo" });
+      const fetchedAt = new Date().toLocaleString("en-GB", { timeZone: "Asia/Colombo" });
+      
+      // Append to Google Sheet (oGV Only)
+      if (p.person_profile?.selected_programmes?.includes(GV_PROGRAMME)) {
+        await appendToSheet("Signups!A:F", [
+          p.id,
+          p.full_name,
+          "oGV",
+          p.contact_detail?.phone || "N/A",
+          dateTime,
+          fetchedAt
+        ]);
+      }
+
       for (const prog of matchedProgrammes) {
         await notifySignup(p, prog);
       }
@@ -290,12 +338,31 @@ async function pollAndSaveApplications() {
   console.log(`[INFO] Retrieved ${apps.length} applications`);
 
   for (const app of apps) {
+    const oppFunc = app.opportunity?.programme?.short_name_display;
+
     try {
       await applicationCollection.insertOne({
         ...app,
         fetched_at: new Date()
       });
       console.log(`[NEW APPLICATION] ${app.person?.full_name}`);
+
+      const dateTime = new Date(app.created_at).toLocaleString("en-GB", { timeZone: "Asia/Colombo" });
+      const fetchedAt = new Date().toLocaleString("en-GB", { timeZone: "Asia/Colombo" });
+
+      // Append to Google Sheet (oGV Only)
+      if (oppFunc === "GV") {
+        await appendToSheet("Applications!A:G", [
+          app.id,
+          app.person?.full_name || "Unknown",
+          oppFunc,
+          app.opportunity?.title || "N/A",
+          app.opportunity?.host_lc?.name || "N/A",
+          dateTime,
+          fetchedAt
+        ]);
+      }
+
       await notifyApplication(app);
     } catch (err) {
       if (err.code === 11000) {
@@ -308,8 +375,14 @@ async function pollAndSaveApplications() {
 }
 
 function validateEnv() {
-  if (!TOKEN || !CHAT_WEBHOOK || !MONGO_URI) {
-    throw new Error("[FATAL] Missing environment variables. Check your .env file.");
+  if (!TOKEN || !CHAT_WEBHOOK || !MONGO_URI || !SHEET_ID) {
+    throw new Error("[FATAL] Missing environment variables (EXPA_TOKEN, CHAT_WEBHOOK_URL, MONGO_URI, or GOOGLE_SHEETS_ID). Check your .env file.");
+  }
+
+  const hasEnv = !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const hasFile = fs.existsSync("service-account.json");
+  if (!hasEnv && !hasFile) {
+    throw new Error("[FATAL] Missing Google Sheets credentials. Please provide GOOGLE_SERVICE_ACCOUNT_JSON env var or place service-account.json in the root directory.");
   }
 }
 
